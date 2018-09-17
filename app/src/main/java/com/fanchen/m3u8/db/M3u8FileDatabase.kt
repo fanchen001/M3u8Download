@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import com.fanchen.m3u8.bean.M3u8File
 import java.util.concurrent.locks.ReentrantLock
 import android.content.ContentValues
+import java.util.*
 
 
 /**
@@ -57,6 +58,12 @@ class M3u8FileDatabase(context: Context, version: Int = 1) : SQLiteOpenHelper(co
             val selectionArgs = arrayOf(id.toString())
             it.delete("tab_m3u8_file", "id = ?", selectionArgs)
         } ?: -1
+    }
+
+    fun delete() {
+        use {
+            it.delete("tab_m3u8_file", null, null)
+        }
     }
 
     fun update(url: String, file: M3u8File): Int {
@@ -121,11 +128,11 @@ class M3u8FileDatabase(context: Context, version: Int = 1) : SQLiteOpenHelper(co
         }
     }
 
-    fun queryAll(): List<M3u8File>? {
+    fun queryAll(): LinkedList<M3u8File>? {
         return use {
             val cs = it.query("tab_m3u8_file", null, null, null, null, null, null, null)
-            val list = ArrayList<M3u8File>()
-            if (cs.moveToNext()) {
+            val list = LinkedList<M3u8File>()
+            while (cs.moveToNext()) {
                 val m3u8File = M3u8File()
                 m3u8File.m3u8Path = cs.getString(cs.getColumnIndex("m3u8Path"))
                 m3u8File.url = cs.getString(cs.getColumnIndex("url"))

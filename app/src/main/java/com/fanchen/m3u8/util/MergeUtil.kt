@@ -1,6 +1,7 @@
 package com.fanchen.m3u8.util
 
 import android.text.TextUtils
+import com.fanchen.m3u8.M3u8Config
 import com.fanchen.m3u8.bean.M3u8
 import java.io.File
 import java.io.FileOutputStream
@@ -11,6 +12,19 @@ import java.io.FileOutputStream
  */
 object MergeUtil {
 
+    fun getTsDirPath(fileName:String): File {
+        val lastIndexOf = fileName.lastIndexOf(".")
+        return if (lastIndexOf != -1) {
+            val dirName = fileName.substring(0, lastIndexOf)
+            val dir = File(M3u8Config.m3u8Path, dirName)
+            if (!dir.exists()) dir.mkdir()
+            dir
+        } else {
+            val dir = File(M3u8Config.m3u8Path, fileName)
+            if (!dir.exists()) dir.mkdir()
+            dir
+        }
+    }
     /**
      * 将M3U8对象的所有ts切片合并为1个
      *
