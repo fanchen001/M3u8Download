@@ -5,6 +5,8 @@ import com.fanchen.m3u8.bean.M3u8Ts
 import com.fanchen.m3u8.util.MergeUtil
 import com.fanchen.m3u8.util.URLUtil
 import java.io.File
+import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ExecutorService
@@ -19,20 +21,17 @@ class M3u8DownloadTask(var m3u8: M3u8, var handler: M3u8Manager.TaskHandler) : R
     var isRunning = false
     private var executor: ExecutorService? = null//10个线程池
 
-    @Synchronized
-    fun start(): M3u8DownloadTask {
-        if (isRunning) return this
-        handler.sendMessage(M3u8Manager.DOWNLOAD_START, m3u8)
+    fun start() {
+        if (isRunning) return
         this.run()
-        return this
     }
 
-    @Synchronized
     fun stop() {
         if (!isRunning) return
-        handler.sendMessage(M3u8Manager.DOWNLOAD_STOP, m3u8)
-        executor?.shutdownNow()
         isRunning = false
+        M3u8Config.log("stop ${m3u8.fileName}")
+        val shutdownNow = executor?.shutdownNow()
+        M3u8Config.log("stop $shutdownNow")
     }
 
     override fun run() {
@@ -41,26 +40,32 @@ class M3u8DownloadTask(var m3u8: M3u8, var handler: M3u8Manager.TaskHandler) : R
             m3u8.error = null
             m3u8.errorTs = null
             executor?.shutdownNow()
+            handler.sendMessage(M3u8Manager.DOWNLOAD_START, m3u8)
             executor = Executors.newFixedThreadPool(M3u8Config.threadCount)
             val downloadList = m3u8.tsList.filter { !File(m3u8.getTsDirPath(), it.getName()).exists() }//過濾掉已近完成下載的ts
             downloadList.forEach { executor?.execute(DownloadRunnable(m3u8, it, executor, handler)) }//開始下載
             executor?.shutdown()//下载完成之后要关闭线程池
             while (executor != null && !executor!!.isTerminated) {
-                Thread.sleep(500)//等待下载完成
+                Thread.sleep(200)//等待下载完成
             }
             if (isRunning && m3u8.checkSuccess()) {//执行到
                 handler.sendMessage(M3u8Manager.DOWNLOAD_MERGE, m3u8)
                 MergeUtil.merge(m3u8, m3u8.getFilePath())//合并文件
                 MergeUtil.deleteDirectory(m3u8.getTsDirPath().absolutePath)//合并完成之后，删除ts零时文件
                 handler.sendMessage(M3u8Manager.DOWNLOAD_SUCCESS, m3u8)
-            } else if (m3u8.error == null) {
+            } else if (m3u8.error == null || m3u8.error is InterruptedIOException || m3u8.error is  InterruptedException) {
                 handler.sendMessage(M3u8Manager.DOWNLOAD_STOP, m3u8)
             } else if (m3u8.error != null && m3u8.errorTs != null) {
                 handler.sendMessage(M3u8Manager.DOWNLOAD_ERROR, m3u8,  m3u8.errorTs!!,m3u8.error!!)
             }
-        } catch (e: Throwable) {
-            e.printStackTrace()
-        } finally {
+        } catch ( e: InterruptedIOException) {
+            return //被中断了，使用stop时会抛出这个，不需要处理
+        } catch (e : IOException) {
+            handler.sendMessage(M3u8Manager.DOWNLOAD_ERROR, m3u8,  m3u8.errorTs!!,e)
+            return
+        } catch (e : Exception ) {
+            handler.sendMessage(M3u8Manager.DOWNLOAD_ERROR, m3u8,  m3u8.errorTs!!,e)
+        }finally {
             isRunning = false
             executor = null
         }
@@ -77,8 +82,8 @@ class M3u8DownloadTask(var m3u8: M3u8, var handler: M3u8Manager.TaskHandler) : R
                 val currentt = m3u8.setCurrenttTs()
                 handler.sendMessage(M3u8Manager.DOWNLOAD_PROGRESS, m3u8, ts, size, currentt)
             } catch (e: Exception) {
-                m3u8.error = e
-                m3u8.errorTs = ts
+                if(m3u8.error == null)m3u8.error = e
+                if(m3u8.errorTs == null)m3u8.errorTs = ts
                 executor?.shutdownNow()//下载出现异常，停止本次m3u8下载
             }
         }

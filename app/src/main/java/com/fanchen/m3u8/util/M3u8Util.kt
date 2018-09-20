@@ -11,6 +11,10 @@ import java.net.URL
 import java.util.zip.GZIPInputStream
 import java.util.zip.Inflater
 import java.util.zip.InflaterInputStream
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 /**
  * M3u8Util
@@ -131,6 +135,33 @@ object M3u8Util {
             e.printStackTrace()
         }
         return 0f
+    }
+
+    fun trustAllHosts() {
+        val trustAllCerts = arrayOf<TrustManager>(X509TrustManagerImpl())
+        try {
+            val sc = SSLContext.getInstance("TLS")
+            sc.init(null, trustAllCerts, java.security.SecureRandom())
+            HttpsURLConnection.setDefaultSSLSocketFactory(sc.socketFactory)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private class X509TrustManagerImpl : X509TrustManager{
+
+        override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {
+            M3u8Config.log("checkClientTrusted")
+        }
+
+        override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {
+            M3u8Config.log("checkServerTrusted")
+        }
+
+        override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> {
+            return arrayOf()
+        }
+
     }
 
     data class Entry(var bytes: ByteArray = kotlin.ByteArray(0), var url: String = "")

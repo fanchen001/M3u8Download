@@ -1,6 +1,7 @@
 package com.fanchen.m3u8.bean
 
 import com.fanchen.m3u8.M3u8Config
+import com.fanchen.m3u8.util.MergeUtil
 import java.io.File
 
 /**
@@ -14,10 +15,19 @@ data class M3u8File(var url: String = "" // m3u8文件索引地址
                     var state: Int = M3u8State.STETE_NON,//下载状态
                     var startTime: Long = System.currentTimeMillis(),//任务添加时间
                     var endTime: Long = -1,//任务结束时间
+                    var onlyId: String = "",//視頻源唯一标识
                     var m3u8: M3u8? = null
 ) {
     fun fileExists(): Boolean {
         return file().exists()
+    }
+
+    fun mp4File():File{
+        return File(M3u8Config.m3u8Path, m3u8VideoName)
+    }
+
+    fun getTsDirPath(): File {
+        return MergeUtil.getTsDirPath(m3u8VideoName)
     }
 
     fun file(): File {

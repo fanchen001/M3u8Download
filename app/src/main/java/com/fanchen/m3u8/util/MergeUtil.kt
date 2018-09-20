@@ -70,6 +70,12 @@ object MergeUtil {
         }
         // 删除文件夹下的所有文件(包括子目录)
         val files = dirFile.listFiles()
+        if(files == null || files.isEmpty()){
+            if(boolean){
+                dirFile.delete()
+            }
+            return true;
+        }
         var flag = false
         for (newFile in files) {
             // 删除子文件

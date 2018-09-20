@@ -15,7 +15,7 @@ import java.util.*
  */
 class M3u8FileDatabase(context: Context, version: Int = 1) : SQLiteOpenHelper(context, "m3u8_download.db", null, version) {
 
-    private val SQL = "create table tab_m3u8_file (id integer primary key autoincrement,m3u8Path text, url text,m3u8VideoName text,state integer,startTime long,endTime long)"
+    private val SQL = "create table tab_m3u8_file (id integer primary key autoincrement,m3u8Path text, url text,m3u8VideoName text,state integer,startTime long,endTime long,onlyId text)"
     private val lock = ReentrantLock()
     override fun onCreate(db: SQLiteDatabase?) {
         db?.execSQL(SQL)
@@ -34,6 +34,7 @@ class M3u8FileDatabase(context: Context, version: Int = 1) : SQLiteOpenHelper(co
             cv.put("state", file.state)
             cv.put("startTime", file.startTime)
             cv.put("endTime", file.endTime)
+            cv.put("onlyId", file.onlyId)
             it.insert("tab_m3u8_file", null, cv)  //调用insert方法，将数据插入数据库
         } ?: -1L
     }
@@ -76,6 +77,7 @@ class M3u8FileDatabase(context: Context, version: Int = 1) : SQLiteOpenHelper(co
             cv.put("state", file.state)
             cv.put("startTime", file.startTime)
             cv.put("endTime", file.endTime)
+            cv.put("onlyId", file.onlyId)
             it.update("tab_m3u8_file", cv, "url = ?", selectionArgs)
         } ?: -1
     }
@@ -90,6 +92,7 @@ class M3u8FileDatabase(context: Context, version: Int = 1) : SQLiteOpenHelper(co
             cv.put("state", file.state)
             cv.put("startTime", file.startTime)
             cv.put("endTime", file.endTime)
+            cv.put("onlyId", file.onlyId)
             it.update("tab_m3u8_file", cv, "id = ?", selectionArgs)
         } ?: -1
     }
@@ -104,6 +107,7 @@ class M3u8FileDatabase(context: Context, version: Int = 1) : SQLiteOpenHelper(co
             cv.put("state", file.state)
             cv.put("startTime", file.startTime)
             cv.put("endTime", file.endTime)
+            cv.put("onlyId", file.onlyId)
             it.update("tab_m3u8_file", cv, "id = ?", selectionArgs)
         }
     }
@@ -122,9 +126,32 @@ class M3u8FileDatabase(context: Context, version: Int = 1) : SQLiteOpenHelper(co
                 m3u8File.startTime = cs.getLong(cs.getColumnIndex("startTime"))
                 m3u8File.state = cs.getInt(cs.getColumnIndex("state"))
                 m3u8File.id = cs.getInt(cs.getColumnIndex("id"))
+                m3u8File.onlyId = cs.getString(cs.getColumnIndex("onlyId"))
             }
             cs.close()
             m3u8File
+        }
+    }
+
+    fun queryAll(state:Int): LinkedList<M3u8File>? {
+        return use {
+            val selectionArgs = arrayOf(state.toString())
+            val cs = it.query("tab_m3u8_file", null, "state = ?", selectionArgs, null, null, null, null)
+            val list = LinkedList<M3u8File>()
+            while (cs.moveToNext()) {
+                val m3u8File = M3u8File()
+                m3u8File.m3u8Path = cs.getString(cs.getColumnIndex("m3u8Path"))
+                m3u8File.url = cs.getString(cs.getColumnIndex("url"))
+                m3u8File.m3u8VideoName = cs.getString(cs.getColumnIndex("m3u8VideoName"))
+                m3u8File.endTime = cs.getLong(cs.getColumnIndex("endTime"))
+                m3u8File.startTime = cs.getLong(cs.getColumnIndex("startTime"))
+                m3u8File.state = cs.getInt(cs.getColumnIndex("state"))
+                m3u8File.id = cs.getInt(cs.getColumnIndex("id"))
+                m3u8File.onlyId = cs.getString(cs.getColumnIndex("onlyId"))
+                list.add(m3u8File)
+            }
+            cs.close()
+            list
         }
     }
 
@@ -141,6 +168,7 @@ class M3u8FileDatabase(context: Context, version: Int = 1) : SQLiteOpenHelper(co
                 m3u8File.startTime = cs.getLong(cs.getColumnIndex("startTime"))
                 m3u8File.state = cs.getInt(cs.getColumnIndex("state"))
                 m3u8File.id = cs.getInt(cs.getColumnIndex("id"))
+                m3u8File.onlyId = cs.getString(cs.getColumnIndex("onlyId"))
                 list.add(m3u8File)
             }
             cs.close()

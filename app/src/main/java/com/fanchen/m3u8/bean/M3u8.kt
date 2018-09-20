@@ -52,7 +52,7 @@ data class M3u8(var url: String = "",
 
     @Synchronized
     fun getCurrenttTs(): Int {
-        if (currentt == -1) currentt = getTsDirPath().listFiles().size
+        if (currentt == -1) currentt = getTsDirPath().listFiles().size - 1
         return currentt
     }
 
