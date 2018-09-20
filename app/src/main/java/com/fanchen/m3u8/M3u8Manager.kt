@@ -8,6 +8,7 @@ import com.fanchen.m3u8.bean.M3u8File
 import com.fanchen.m3u8.bean.M3u8State
 import com.fanchen.m3u8.bean.M3u8Ts
 import com.fanchen.m3u8.db.M3u8FileDatabase
+import com.fanchen.m3u8.listener.OnM3u8DeleteListener
 import com.fanchen.m3u8.listener.OnM3u8DownloadListenr
 import com.fanchen.m3u8.listener.OnM3u8FileListener
 import com.fanchen.m3u8.listener.OnM3u8InfoListener
@@ -35,6 +36,12 @@ object M3u8Manager : Runnable {
     val DOWNLOAD_MERGE = 5
     val PRESE_SUCCESS = 6
     val PRESE_ERROR = 7
+    val DOWNLOAD_STOP_PRE = 8
+    val DOWNLOAD_START_PRE = 9
+    val DOWNLOAD_STOP_LIST = 10
+    val DOWNLOAD_START_LIST = 11
+    val DELETE_FILE = 12
+    val DELETE_LIST = 13
 
 
     private var quit = false//停止的标记.
@@ -43,14 +50,16 @@ object M3u8Manager : Runnable {
     private val infoListeners = LinkedList<OnM3u8InfoListener>()
     private val downListeners = LinkedList<OnM3u8DownloadListenr>()
     private val m3u8Listeners = LinkedList<OnM3u8FileListener>()
+    private val delListeners = LinkedList<OnM3u8DeleteListener>()
     private val mHandler = TaskHandler()
-    private val executor = Executors.newFixedThreadPool(3)
+    private val executor = Executors.newFixedThreadPool(4)
     private var database: M3u8FileDatabase? = null
 
     private val queue = LinkedList<M3u8>()
 
     init {
         try {
+            M3u8Util.trustAllHosts()
             if (M3u8Config.context != null) database = M3u8FileDatabase(M3u8Config.context!!)
             executor.execute(this)
         } catch (e: Exception) {
@@ -60,7 +69,17 @@ object M3u8Manager : Runnable {
 
     fun start() {
         try {
-            executor.execute(SrattExecute())
+            if (database == null || queue.isNotEmpty() || (task != null && task!!.isRunning)) return
+            //只有當所有的任務全部停止之後，才能調用開始下載全部任務
+            executor.execute {
+                val down = database!!.queryAll(M3u8State.STETE_DOWNLOAD)
+                val non = database!!.queryAll(M3u8State.STETE_NON)
+                val newList = LinkedList<M3u8File>()
+                if (non != null) newList.addAll(non)
+                if (down != null) newList.addAll(down)
+                mHandler.sendMessage(DOWNLOAD_START_LIST, newList)
+                newList.forEach { download(it) }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -69,35 +88,66 @@ object M3u8Manager : Runnable {
     fun start(m3u8File: M3u8File) {
         var m3u8: M3u8? = null
         queue.forEach { if (m3u8File.url == it.parentUrl) m3u8 = it }
-        if (m3u8 == null) {//任务不存在下载列表中
+        if (m3u8 == null && task != null) {
+            if (task!!.m3u8.parentUrl == m3u8File.url) {
+                m3u8 = task?.m3u8
+            }
+        }
+        if (m3u8 == null && !m3u8File.mp4File().exists()) {//任务不存在下载列表,并且下载文件不存在的情况下才可以开始下载
+            mHandler.sendMessage(DOWNLOAD_START_PRE, m3u8File)
             download(m3u8File)
+        } else if (m3u8File.mp4File().exists()) {
+            mHandler.sendMessage(DOWNLOAD_SUCCESS, M3u8("", m3u8File.m3u8VideoName, m3u8File.url))
+            M3u8Config.log("${m3u8File.mp4File().name} 已经下载完成")
+        } else if (m3u8 != null) {
+            M3u8Config.log("${m3u8?.fileName} 任务已经存在")
         }
     }
 
     fun stop() {
+        executor.execute {
+            val non = database?.queryAll(M3u8State.STETE_NON)
+            val down = database?.queryAll(M3u8State.STETE_DOWNLOAD)
+            val newList = LinkedList<M3u8File>()
+            if (non != null) newList.addAll(non)
+            if (down != null) newList.addAll(down)
+            mHandler.sendMessage(DOWNLOAD_STOP_LIST, newList)
+            newList.forEach {
+                it.state = M3u8State.STETE_STOP
+                database?.update(it)
+            }
+        }
         queue.clear()
         task?.stop()
     }
 
     fun stop(m3u8File: M3u8File) {
         var m3u8: M3u8? = null
-        queue.forEach {
-            if (m3u8File.url == it.parentUrl)
-                m3u8 = it
-        }
+        queue.forEach { if (m3u8File.url == it.parentUrl) m3u8 = it }
         if (m3u8 != null) {
+            executor.execute {
+                val file = database?.query(m3u8File.url) ?: return@execute
+                file.state = M3u8State.STETE_STOP
+                database?.update(file)
+            }
             queue.remove(m3u8!!)
+            mHandler.sendMessage(DOWNLOAD_STOP, m3u8File)
         } else if (m3u8File.url == task?.m3u8?.parentUrl) {
-            task?.stop()
+            mHandler.sendMessage(DOWNLOAD_STOP_PRE, m3u8File)
+            Thread { task?.stop() }.start()
         }
     }
 
-    fun queryM3u8File() {
+    fun queryAllASync() {
         try {
-            executor.execute { mHandler.sendMessage(QUERY_SUCCESS, database?.queryAll() ?: LinkedList<M3u8File>()) }
+            Thread({ mHandler.sendMessage(QUERY_SUCCESS, database?.queryAll() ?: LinkedList<M3u8File>()) }).start()
         } catch (e: Throwable) {
             mHandler.sendMessage(QUERY_ERROR, e)
         }
+    }
+
+    fun queryAllSync(): LinkedList<M3u8File> {
+        return database?.queryAll() ?: LinkedList<M3u8File>()
     }
 
     /**
@@ -157,6 +207,16 @@ object M3u8Manager : Runnable {
         infoListeners.remove(infoListener)
     }
 
+    fun registerDeleteListeners(delListener: OnM3u8DeleteListener) {
+        if (!delListeners.contains(delListener)) {
+            delListeners.add(delListener)
+        }
+    }
+
+    fun unregisterDeleteListeners(delListener: OnM3u8DeleteListener) {
+        delListeners.remove(delListener)
+    }
+
     fun registerM3u8Listeners(m3u8FileListener: OnM3u8FileListener) {
         if (!m3u8Listeners.contains(m3u8FileListener)) {
             m3u8Listeners.add(m3u8FileListener)
@@ -198,9 +258,10 @@ object M3u8Manager : Runnable {
             executor.execute {
                 if (isRaw) { //是否删除下载的文件
                     MergeUtil.deleteFile(File(m3u8File.m3u8Path, m3u8File.m3u8VideoName).absolutePath)
-                    MergeUtil.deleteDirectory(MergeUtil.getTsDirPath(m3u8File.m3u8VideoName).absolutePath)
+                    MergeUtil.deleteDirectory(m3u8File.getTsDirPath().absolutePath,true)
                 }
                 database?.delete(m3u8File.url)
+                mHandler.sendMessage(DELETE_FILE,m3u8File)
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -214,7 +275,9 @@ object M3u8Manager : Runnable {
                 if (isRaw) { //是否删除下载的文件
                     MergeUtil.deleteDirectory(M3u8Config.m3u8Path)
                 }
+                val list = database?.queryAll() ?: LinkedList<M3u8File>()
                 database?.delete()
+                mHandler.sendMessage(DELETE_LIST,list)
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -259,29 +322,20 @@ object M3u8Manager : Runnable {
             while (queue.size > 0) {
                 val removeAt = queue.removeAt(0)
                 M3u8Config.log("${removeAt.url} => download ts start")
-                task = M3u8DownloadTask(removeAt, mHandler).start()
+                task = M3u8DownloadTask(removeAt, mHandler)
+                task?.start()
                 M3u8Config.log("${removeAt.url} => download ts end")
             }
             try {
                 M3u8Config.log("thread wait")
-                synchronized(lock) { lock.wait() }//没有执行项时等待
+                synchronized(lock) {
+                    task = null
+                    lock.wait()
+                }//没有执行项时等待
             } catch (e: Exception) {
                 if (quit) queue.clear()//被中断的是退出就结束，否则继续
             }
         }
-    }
-
-    class SrattExecute : Runnable {
-
-        override fun run() {
-            try {
-                stop()//先停止之前的全部任务，重新开始下载
-                database?.queryAll()?.forEach { executor.execute(M3u8FileRunnable(it)) }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
     }
 
     class M3u8FileRunnable(private var m3u8File: M3u8File) : Runnable {
@@ -340,6 +394,13 @@ object M3u8Manager : Runnable {
                 DOWNLOAD_MERGE -> downListeners.forEach {
                     it.onMerge(objs[0] as M3u8)
                 }
+                DOWNLOAD_START_PRE -> {
+                    val m3u8 = objs[0] as M3u8File
+                    update(m3u8.url, M3u8State.STETE_DOWNLOAD)
+                    downListeners.forEach {
+                        it.onStarPre(m3u8)
+                    }
+                }
                 DOWNLOAD_START -> {
                     val m3u8 = objs[0] as M3u8
                     update(m3u8.parentUrl, M3u8State.STETE_DOWNLOAD)
@@ -347,11 +408,30 @@ object M3u8Manager : Runnable {
                         it.onStart(m3u8)
                     }
                 }
+                DOWNLOAD_START_LIST -> {
+                    val m3u8s = objs[0] as LinkedList<M3u8File>
+                    downListeners.forEach {
+                        it.onStart(m3u8s)
+                    }
+                }
+                DOWNLOAD_STOP_PRE -> {
+                    val m3u8 = objs[0] as M3u8File
+                    update(m3u8.url, M3u8State.STETE_STOP)
+                    downListeners.forEach {
+                        it.onStopPre(m3u8)
+                    }
+                }
                 DOWNLOAD_STOP -> {
                     val m3u8 = objs[0] as M3u8
                     update(m3u8.parentUrl, M3u8State.STETE_STOP)
                     downListeners.forEach {
                         it.onStop(m3u8)
+                    }
+                }
+                DOWNLOAD_STOP_LIST -> {
+                    val m3u8s = objs[0] as LinkedList<M3u8File>
+                    downListeners.forEach {
+                        it.onStop(m3u8s)
                     }
                 }
                 DOWNLOAD_SUCCESS -> {
@@ -366,6 +446,18 @@ object M3u8Manager : Runnable {
                     update(m3u8.parentUrl, M3u8State.STETE_ERROR)
                     downListeners.forEach {
                         it.onError(m3u8, objs[1] as M3u8Ts, objs[2] as Throwable)
+                    }
+                }
+                DELETE_LIST -> {
+                    val m3u8s = objs[0] as LinkedList<M3u8File>
+                    delListeners.forEach {
+                        it.onDelete(m3u8s)
+                    }
+                }
+                DELETE_FILE -> {
+                    val m3u8 = objs[0] as M3u8File
+                    delListeners.forEach {
+                        it.onDelete(m3u8)
                     }
                 }
                 PRESE_SUCCESS -> {
@@ -384,10 +476,16 @@ object M3u8Manager : Runnable {
                     val file = objs[0] as M3u8File
                     file.state = M3u8State.STETE_ERROR
                     updateAndInsert(file.url, file)
-                    if (file.id == -1)
+                    if (file.id == -1) {
                         infoListeners.forEach {
                             it.onError(file, objs[1] as Throwable)
                         }
+                    } else {
+                        val m3u8 = M3u8("", file.m3u8VideoName, file.url);
+                        downListeners.forEach {
+                            it.onError(m3u8, M3u8Ts(), objs[1] as Throwable)
+                        }
+                    }
                 }
             }
         }
