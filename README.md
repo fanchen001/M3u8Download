@@ -38,7 +38,7 @@
 
  })
  M3u8Manager.download(M3u8File(""))//开始 M3u8File to M3u8
- 
+  ```
  
  以上是最简单的使用方式。具体其他使用方式，可以参考[次元番](https://github.com/fanchen001/Bangumi)
  
