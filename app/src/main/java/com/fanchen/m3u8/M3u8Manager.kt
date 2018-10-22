@@ -3,6 +3,7 @@ package com.fanchen.m3u8
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
+import android.support.v7.widget.RecyclerView
 import com.fanchen.m3u8.bean.M3u8
 import com.fanchen.m3u8.bean.M3u8File
 import com.fanchen.m3u8.bean.M3u8State
@@ -69,9 +70,10 @@ object M3u8Manager : Runnable {
 
     fun start() {
         try {
-            if (database == null || queue.isNotEmpty() || (task != null && task!!.isRunning)) return
+            if (queue.isNotEmpty() || (task != null && task!!.isRunning)) return
             //只有當所有的任務全部停止之後，才能調用開始下載全部任務
             executor.execute {
+                if (database == null)return@execute
                 val down = database!!.queryAll(M3u8State.STETE_DOWNLOAD)
                 val non = database!!.queryAll(M3u8State.STETE_NON)
                 val newList = LinkedList<M3u8File>()
@@ -238,9 +240,10 @@ object M3u8Manager : Runnable {
     }
 
     fun updateAndInsert(url: String, file: M3u8File) {
-        if (database == null) return
+
         try {
             executor.execute {
+                if (database == null) return@execute
                 if (database!!.isExists(file)) {
                     database!!.update(url, file)
                 } else {
@@ -285,9 +288,9 @@ object M3u8Manager : Runnable {
     }
 
     fun update(url: String, state: Int) {
-        if (database == null) return
         try {
             executor.execute {
+                if (database == null) return@execute
                 val file = database!!.query(url) ?: return@execute
                 file.state = state
                 if (file.state == M3u8State.STETE_SUCCESS) file.endTime = System.currentTimeMillis()
@@ -383,107 +386,116 @@ object M3u8Manager : Runnable {
             val objs = msg?.obj as? Array<Any> ?: return
             when (msg.what) {
                 QUERY_SUCCESS -> m3u8Listeners.forEach {
-                    it.onQueryFile(objs[0] as LinkedList<M3u8File>)
+                    val list = objs[0] as? LinkedList<M3u8File> ?: return
+                    it.onQueryFile(list)
                 }
                 QUERY_ERROR -> m3u8Listeners.forEach {
-                    it.onQueryError(objs[0] as Throwable)
+                    val thr = objs[0] as? Throwable ?: return
+                    it.onQueryError(thr)
                 }
                 DOWNLOAD_PROGRESS -> downListeners.forEach {
-                    it.onProgress(objs[0] as M3u8, objs[1] as M3u8Ts, objs[2] as Int, objs[3] as Int)
+                    val m3u8 = objs[0] as? M3u8 ?: return
+                    val ts = objs[1] as? M3u8Ts ?: return
+                    val position = objs[2] as? Int ?: return
+                    val totel = objs[3] as? Int ?: return
+                    it.onProgress(m3u8, ts, position, totel)
                 }
                 DOWNLOAD_MERGE -> downListeners.forEach {
-                    it.onMerge(objs[0] as M3u8)
+                    val m3u8 = objs[0] as? M3u8 ?: return
+                    it.onMerge(m3u8)
                 }
                 DOWNLOAD_START_PRE -> {
-                    val m3u8 = objs[0] as M3u8File
+                    val m3u8 = objs[0] as? M3u8File ?: return
                     update(m3u8.url, M3u8State.STETE_DOWNLOAD)
                     downListeners.forEach {
                         it.onStarPre(m3u8)
                     }
                 }
                 DOWNLOAD_START -> {
-                    val m3u8 = objs[0] as M3u8
+                    val m3u8 = objs[0] as? M3u8 ?: return
                     update(m3u8.parentUrl, M3u8State.STETE_DOWNLOAD)
                     downListeners.forEach {
                         it.onStart(m3u8)
                     }
                 }
                 DOWNLOAD_START_LIST -> {
-                    val m3u8s = objs[0] as LinkedList<M3u8File>
+                    val m3u8s = objs[0] as? LinkedList<M3u8File> ?:return
                     downListeners.forEach {
                         it.onStart(m3u8s)
                     }
                 }
                 DOWNLOAD_STOP_PRE -> {
-                    val m3u8 = objs[0] as M3u8File
+                    val m3u8 = objs[0] as? M3u8File ?: return
                     update(m3u8.url, M3u8State.STETE_STOP)
                     downListeners.forEach {
                         it.onStopPre(m3u8)
                     }
                 }
                 DOWNLOAD_STOP -> {
-                    val m3u8 = objs[0] as M3u8
+                    val m3u8 = objs[0] as? M3u8 ?: return
                     update(m3u8.parentUrl, M3u8State.STETE_STOP)
                     downListeners.forEach {
                         it.onStop(m3u8)
                     }
                 }
                 DOWNLOAD_STOP_LIST -> {
-                    val m3u8s = objs[0] as LinkedList<M3u8File>
+                    val m3u8s = objs[0] as? LinkedList<M3u8File> ?: return
                     downListeners.forEach {
                         it.onStop(m3u8s)
                     }
                 }
                 DOWNLOAD_SUCCESS -> {
-                    val m3u8 = objs[0] as M3u8
+                    val m3u8 = objs[0] as? M3u8 ?: return
                     update(m3u8.parentUrl, M3u8State.STETE_SUCCESS)
                     downListeners.forEach {
                         it.onSuccess(m3u8)
                     }
                 }
                 DOWNLOAD_ERROR -> {
-                    val m3u8 = objs[0] as M3u8
+                    val m3u8 = objs[0] as? M3u8 ?: return
                     update(m3u8.parentUrl, M3u8State.STETE_ERROR)
                     downListeners.forEach {
                         it.onError(m3u8, objs[1] as M3u8Ts, objs[2] as Throwable)
                     }
                 }
                 DELETE_LIST -> {
-                    val m3u8s = objs[0] as LinkedList<M3u8File>
+                    val m3u8s = objs[0] as? LinkedList<M3u8File> ?: return
                     delListeners.forEach {
                         it.onDelete(m3u8s)
                     }
                 }
                 DELETE_FILE -> {
-                    val m3u8 = objs[0] as M3u8File
+                    val m3u8 = objs[0] as? M3u8File ?: return
                     delListeners.forEach {
                         it.onDelete(m3u8)
                     }
                 }
                 PRESE_SUCCESS -> {
-                    val file = objs[0] as M3u8File
+                    val file = objs[0] as? M3u8File ?: return
+                    val list = objs[1] as? List<M3u8> ?: return
                     file.state = M3u8State.STETE_NON
                     updateAndInsert(file.url, file)
                     if (file.id == -1) {
                         infoListeners.forEach {
-                            it.onSuccess(file, objs[1] as List<M3u8>)
+                            it.onSuccess(file, list)
                         }
                     } else {
-                        download(objs[1] as List<M3u8>)
+                        download(list)
                     }
                 }
                 PRESE_ERROR -> {
-                    val file = objs[0] as M3u8File
+                    val file = objs[0] as? M3u8File ?: return
+                    val thr = objs[1] as? Throwable ?: return
                     file.state = M3u8State.STETE_ERROR
                     updateAndInsert(file.url, file)
                     if (file.id == -1) {
                         infoListeners.forEach {
-                            it.onError(file, objs[1] as Throwable)
+                            it.onError(file, thr)
                         }
                     } else {
                         val m3u8 = M3u8("", file.m3u8VideoName, file.url);
                         downListeners.forEach {
-                            it.onError(m3u8, M3u8Ts(), objs[1] as Throwable)
+                            it.onError(m3u8, M3u8Ts(), thr)
                         }
                     }
                 }

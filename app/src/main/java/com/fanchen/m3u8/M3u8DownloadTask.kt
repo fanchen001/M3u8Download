@@ -56,15 +56,15 @@ class M3u8DownloadTask(var m3u8: M3u8, var handler: M3u8Manager.TaskHandler) : R
             } else if (m3u8.error == null || m3u8.error is InterruptedIOException || m3u8.error is  InterruptedException) {
                 handler.sendMessage(M3u8Manager.DOWNLOAD_STOP, m3u8)
             } else if (m3u8.error != null && m3u8.errorTs != null) {
-                handler.sendMessage(M3u8Manager.DOWNLOAD_ERROR, m3u8,  m3u8.errorTs!!,m3u8.error!!)
+                handler.sendMessage(M3u8Manager.DOWNLOAD_ERROR, m3u8,  m3u8.errorTs ?: M3u8Ts(),m3u8.error?: Throwable("error null"))
             }
         } catch ( e: InterruptedIOException) {
             return //被中断了，使用stop时会抛出这个，不需要处理
         } catch (e : IOException) {
-            handler.sendMessage(M3u8Manager.DOWNLOAD_ERROR, m3u8,  m3u8.errorTs!!,e)
+            handler.sendMessage(M3u8Manager.DOWNLOAD_ERROR, m3u8,  m3u8.errorTs ?: Throwable("IOException"),e)
             return
-        } catch (e : Exception ) {
-            handler.sendMessage(M3u8Manager.DOWNLOAD_ERROR, m3u8,  m3u8.errorTs!!,e)
+        } catch (e : Throwable ) {
+            handler.sendMessage(M3u8Manager.DOWNLOAD_ERROR, m3u8,  m3u8.errorTs ?: Throwable("Throwable"),e)
         }finally {
             isRunning = false
             executor = null
